@@ -1,220 +1,301 @@
 import streamlit as st
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
+import uuid
 
-st.set_page_config(page_title="Kuza Wellness | Patient Navigation", page_icon="🌿", layout="centered")
+st.set_page_config(page_title="Kuza Wellness", page_icon="🌿", layout="wide")
 
-FACILITIES = [
-    {"name":"Kamembe Health Centre","area":"Kamembe","services":["General consultation","Maternal health","Child health"],"wait":"30–45 min","slots":["09:00","11:30","14:00"]},
-    {"name":"Rusizi District Hospital","area":"Rusizi","services":["General consultation","Laboratory","Maternal health"],"wait":"45–75 min","slots":["10:00","13:00","15:00"]},
-    {"name":"Gihundwe Health Centre","area":"Gihundwe","services":["General consultation","Child health","Immunisation"],"wait":"20–40 min","slots":["08:30","12:00","14:30"]},
-]
+# DEMONSTRATION ONLY: data is held in Streamlit session state, not a shared database.
+# Sample facilities/capacities are illustrative and are not live facility availability.
 
-# The original six steps are preserved. Follow-up is added as a seventh step.
-PAGES = ["Welcome","Trust & consent","Your needs","Find care","Choose an option","Next steps","Follow-up"]
+FACILITIES = {
+    "Kamembe Health Centre": {
+        "district": "Rusizi", "sector": "Kamembe",
+        "services": ["General consultation", "Maternal health", "Child health"],
+        "daily_capacity": 30,
+        "slots": {"09:00": 10, "10:00": 10, "11:30": 10},
+    },
+    "Rusizi District Hospital": {
+        "district": "Rusizi", "sector": "Gihundwe",
+        "services": ["General consultation", "Laboratory", "Maternal health"],
+        "daily_capacity": 30,
+        "slots": {"10:00": 10, "13:00": 10, "15:00": 10},
+    },
+    "Gihundwe Health Centre": {
+        "district": "Rusizi", "sector": "Gihundwe",
+        "services": ["General consultation", "Child health", "Immunisation"],
+        "daily_capacity": 20,
+        "slots": {"08:30": 7, "12:00": 7, "14:30": 6},
+    },
+}
+SERVICES = ["General consultation", "Maternal health", "Child health", "Laboratory", "Immunisation"]
 
-if "page" not in st.session_state: st.session_state.page = PAGES[0]
-if "consent" not in st.session_state: st.session_state.consent = False
-if "area" not in st.session_state: st.session_state.area = "Kamembe"
-if "service" not in st.session_state: st.session_state.service = "General consultation"
-if "facility" not in st.session_state: st.session_state.facility = None
-if "slot" not in st.session_state: st.session_state.slot = None
+TEXT = {
+    "English": {
+        "tagline": "Find care. Book ahead. Make your next step clearer.",
+        "patient": "Patient application", "staff": "Facility staff dashboard", "language": "Language",
+        "district": "District", "sector": "Sector", "service": "Healthcare service", "date": "Appointment date",
+        "search": "Find available appointments", "results": "Available healthcare facilities",
+        "remaining": "appointments remaining", "capacity": "Daily capacity", "times": "Available appointment times",
+        "choose": "View facility and choose a time", "book": "Confirm demo booking", "appointments": "My appointments",
+        "confirmed": "Your demo appointment is confirmed", "reference": "Booking reference",
+        "emergency": "For a medical emergency, seek urgent medical care. Do not wait for an online appointment.",
+        "demo": "DEMO ONLY — sample facilities, capacity and bookings. Not connected to live facilities, a shared database or SMS.",
+    },
+    "Kinyarwanda": {
+        "tagline": "Shaka serivisi z'ubuzima. Bika igihe. Menya intambwe ikurikira.",
+        "patient": "Urubuga rw'umurwayi", "staff": "Imicungire y'ikigo nderabuzima", "language": "Ururimi",
+        "district": "Akarere", "sector": "Umurenge", "service": "Serivisi y'ubuvuzi", "date": "Itariki yo kwivuza",
+        "search": "Shaka ibihe byo kwivuza bihari", "results": "Ibigo nderabuzima bifite ibihe bihari",
+        "remaining": "ibihe byo kwivuza bisigaye", "capacity": "Ubushobozi bw'umunsi", "times": "Ibihe byo kwivuza bihari",
+        "choose": "Reba ikigo uhitemo igihe", "book": "Emeza ubusabe bwo kwivuza", "appointments": "Ibihe byanjye byo kwivuza",
+        "confirmed": "Ubusabe bwo kwivuza bwemejwe muri iyi demo", "reference": "Nomero y'ubusabe",
+        "emergency": "Mu gihe cy'ubutabazi bwihutirwa, jya kwa muganga byihuse. Ntutegereze gahunda yo kuri murandasi.",
+        "demo": "IGERAGEZA GUSA — ibigo, ubushobozi n'ubusabe ni ingero. Ntabwo bihujwe n'ibigo nyabyo, ububiko rusange cyangwa SMS.",
+    },
+}
 
-# New fields for the two navigation pathways and follow-up feature.
-if "mode" not in st.session_state: st.session_state.mode = "Self-navigation"
-if "followup_date" not in st.session_state: st.session_state.followup_date = date.today() + timedelta(days=30)
-if "followup_service" not in st.session_state: st.session_state.followup_service = "Follow-up consultation"
-if "followup_notes" not in st.session_state: st.session_state.followup_notes = ""
-if "followup_status" not in st.session_state: st.session_state.followup_status = "Planned"
-if "reminder_choice" not in st.session_state: st.session_state.reminder_choice = "Show reminder in this demo"
+# State is local to the current Streamlit session. It is not shared between users.
+def init_state():
+    defaults = {
+        "language": "English", "portal": "Patient application", "district": "Rusizi",
+        "sector": "All sectors", "service": SERVICES[0], "appointment_date": date.today() + timedelta(days=1),
+        "selected_facility": None, "selected_slot": None, "demo_bookings": [],
+        "daily_capacity": {name: data["daily_capacity"] for name, data in FACILITIES.items()},
+        "slot_capacity": {name: data["slots"].copy() for name, data in FACILITIES.items()},
+        "followup_date": date.today() + timedelta(days=30), "followup_service": "Follow-up consultation",
+        "followup_notes": "", "followup_status": "Planned", "reminder_choice": "Show reminder in this demo",
+        "mode": "Self-navigation", "consent": False,
+    }
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value.copy() if isinstance(value, (dict, list)) else value
 
-# Original header design and wording are retained.
-st.markdown("""<div style="padding:1.2rem;border-radius:16px;background:linear-gradient(120deg,#e8f5e9,#e3f2fd)">
-<div style="font-weight:800;color:#245c4a">KUZA WELLNESS</div>
-<h1 style="margin:.25rem 0;color:#173b32">Healthcare navigation, with community support</h1>
-<p style="margin:0;color:#314d47">A CHV-assisted prototype to help people explore care options with more confidence.</p></div>""", unsafe_allow_html=True)
-st.caption("VIS Module 7 prototype • Demo data only • Not a medical service or live booking system")
+init_state()
+T = TEXT[st.session_state.language]
 
-nav = st.columns(len(PAGES))
-for i, page in enumerate(PAGES):
-    with nav[i]:
-        if st.button(str(i+1), key=f"nav{i}", help=page, use_container_width=True):
-            st.session_state.page = page
-            st.rerun()
-st.caption(f"Current step: **{st.session_state.page}**")
-st.progress((PAGES.index(st.session_state.page)+1)/len(PAGES))
+st.markdown("""<div style="padding:1.1rem 1.4rem;border-radius:16px;background:linear-gradient(120deg,#e8f5e9,#e3f2fd);">
+<div style="font-weight:800;letter-spacing:.08em;color:#245c4a">KUZA WELLNESS</div>
+<h1 style="margin:.25rem 0;color:#173b32">Healthcare navigation and appointment access</h1>
+<p style="margin:0;color:#314d47">Find participating care options, understand availability and plan your next step.</p></div>""", unsafe_allow_html=True)
+st.warning(T["demo"])
+st.info(T["emergency"])
 
-def go(page):
-    st.session_state.page = page
-    st.rerun()
+left, right = st.columns([3, 1])
+with right:
+    st.session_state.language = st.selectbox("Language / Ururimi", ["English", "Kinyarwanda"], index=["English", "Kinyarwanda"].index(st.session_state.language))
+T = TEXT[st.session_state.language]
 
-def reset():
-    st.session_state.page = "Welcome"
-    st.session_state.consent = False
-    st.session_state.area = "Kamembe"
-    st.session_state.service = "General consultation"
-    st.session_state.facility = None
-    st.session_state.slot = None
-    st.session_state.mode = "Self-navigation"
-    st.session_state.followup_date = date.today() + timedelta(days=30)
-    st.session_state.followup_service = "Follow-up consultation"
-    st.session_state.followup_notes = ""
-    st.session_state.followup_status = "Planned"
-    st.session_state.reminder_choice = "Show reminder in this demo"
-    st.rerun()
+st.session_state.portal = st.radio("Choose your access", [T["patient"], T["staff"]], horizontal=True)
+is_staff = st.session_state.portal == T["staff"]
+st.divider()
 
-if st.session_state.page == "Welcome":
-    st.subheader("Find your next healthcare step")
-    st.write("Kuza Wellness helps you explore healthcare options with support from a Community Health Volunteer (CHV). You remain in control of whether to continue.")
 
-    # Added choice of navigation mode without removing the original welcome content.
-    st.markdown("### How would you like to use Kuza Wellness?")
-    mode_choice = st.radio(
-        "Choose your preferred navigation pathway:",
-        ["Navigate myself", "Get help from a CHV"],
-        horizontal=True,
-        index=0 if st.session_state.mode == "Self-navigation" else 1,
-    )
-    st.session_state.mode = "Self-navigation" if mode_choice == "Navigate myself" else "CHV-assisted navigation"
+def booked_count(facility, day=None, slot=None, service=None):
+    total = 0
+    for booking in st.session_state.demo_bookings:
+        if booking["facility"] != facility or booking["status"] != "Confirmed":
+            continue
+        if day is not None and booking["date"] != str(day):
+            continue
+        if slot is not None and booking["slot"] != slot:
+            continue
+        if service is not None and booking["service"] != service:
+            continue
+        total += 1
+    return total
 
-    if st.session_state.mode == "Self-navigation":
-        st.info("You can explore healthcare options independently. You may still ask a CHV or trusted person for help if you want.")
-    else:
-        st.info("A CHV can help you understand the service and navigate available options. CHVs do not replace qualified healthcare professionals.")
 
-    st.markdown("- Understand the service before sharing information\n- Choose what basic information to provide\n- Explore sample facilities and service options\n- Review possible next steps")
-    st.button("Continue to trust & consent →", type="primary", use_container_width=True, on_click=go, args=("Trust & consent",))
+def capacity_summary(facility, day, slot=None):
+    daily = st.session_state.daily_capacity[facility]
+    daily_booked = booked_count(facility, day=day)
+    daily_remaining = max(0, daily - daily_booked)
+    if slot is None:
+        return daily, daily_booked, daily_remaining
+    cap = st.session_state.slot_capacity[facility][slot]
+    slot_booked = booked_count(facility, day=day, slot=slot)
+    return cap, slot_booked, max(0, min(cap - slot_booked, daily_remaining))
 
-elif st.session_state.page == "Trust & consent":
-    st.subheader("The Moment of Truth: trust & consent")
-    st.warning("This is the critical component being tested: would a person trust the navigation service enough to continue?")
+
+if not is_staff:
+    st.subheader(T["patient"])
+    st.write("Explore sample services and facilities. Only participating facilities with published slots would appear in a live service.")
     with st.container(border=True):
-        st.markdown("### Before you continue")
-        if st.session_state.mode == "CHV-assisted navigation":
-            st.write("You have chosen CHV-assisted navigation. A CHV may explain the service and help you understand options within the CHV's authorised role.")
-        else:
-            st.write("You have chosen self-navigation. You can explore the options independently and may request community support at any point.")
-        st.write("This demo helps you explore healthcare options. It does not send information to a clinic, make real appointments, or provide medical advice.")
-        st.write("In a real service, you should be told what information is collected, why it is needed, who can access it, and how it is protected. You may stop at any time.")
-        st.session_state.consent = st.checkbox("I understand this is a demonstration and choose to continue using sample information.", value=st.session_state.consent)
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         with c1:
-            if st.button("I do not want to continue", use_container_width=True):
-                st.session_state.consent = False
-                st.session_state.page = "Welcome"
-                st.rerun()
+            st.session_state.service = st.selectbox(T["service"], SERVICES, index=SERVICES.index(st.session_state.service))
         with c2:
-            if st.button("I understand — continue →", type="primary", use_container_width=True):
-                if st.session_state.consent: go("Your needs")
-                else: st.error("Select the checkbox if you want to continue.")
-    st.caption('User-test prompt: “Would you actually take this step, or would you stop here? Why?” Record their actual words.')
+            st.session_state.district = st.selectbox(T["district"], ["Rusizi"], index=0)
+            sectors = ["All sectors", "Kamembe", "Gihundwe"]
+            st.session_state.sector = st.selectbox(T["sector"], sectors, index=sectors.index(st.session_state.sector))
+        with c3:
+            st.session_state.appointment_date = st.date_input(T["date"], value=st.session_state.appointment_date,
+                min_value=date.today(), max_value=date.today() + timedelta(days=7))
+        search = st.button(T["search"], type="primary", use_container_width=True)
 
-elif st.session_state.page == "Your needs":
-    st.subheader("Tell us what would help you")
-    st.write("This demo uses minimal, non-identifying information. Do not enter names, phone numbers, ID numbers, or private medical details.")
-    st.session_state.area = st.selectbox("Preferred area", ["Kamembe","Gihundwe","Other / not sure"])
-    st.session_state.service = st.selectbox("Type of service", ["General consultation","Maternal health","Child health","Laboratory","Immunisation"])
-    st.info("A real service would require secure data handling and verified facility information.")
-    st.button("Show care options →", type="primary", use_container_width=True, on_click=go, args=("Find care",))
+    if search or st.session_state.get("show_results", False):
+        st.session_state.show_results = True
+        st.subheader(T["results"])
+        matches = []
+        for name, facility in FACILITIES.items():
+            if st.session_state.service not in facility["services"]:
+                continue
+            if st.session_state.sector != "All sectors" and facility["sector"] != st.session_state.sector:
+                continue
+            _, _, remaining = capacity_summary(name, st.session_state.appointment_date)
+            matches.append((name, facility, remaining))
+        if not matches:
+            st.info("No sample facilities match these filters. Try another service or sector.")
+        for name, facility, remaining in matches:
+            with st.container(border=True):
+                a, b = st.columns([3, 1])
+                with a:
+                    st.markdown(f"### {name}")
+                    st.write(f"**Location:** {facility['district']} District, {facility['sector']} Sector")
+                    st.write(f"**Service:** {st.session_state.service}")
+                    st.write(f"**Daily capacity:** {st.session_state.daily_capacity[name]}")
+                    st.write(f"**{T['remaining']}:** {remaining}")
+                with b:
+                    if remaining == 0:
+                        st.error("Fully booked")
+                    elif remaining <= 5:
+                        st.warning("Limited availability")
+                    else:
+                        st.success("More slots available")
+                    if st.button(T["choose"], key=f"details_{name}", disabled=remaining == 0, use_container_width=True):
+                        st.session_state.selected_facility = name
+                        st.session_state.selected_slot = None
+                        st.rerun()
 
-elif st.session_state.page == "Find care":
-    st.subheader("Explore healthcare options")
-    st.write("All facilities, wait estimates, and appointment slots below are illustrative demo records, not live or verified data.")
-    matches = [f for f in FACILITIES if st.session_state.service in f["services"] and (st.session_state.area == "Other / not sure" or f["area"] == st.session_state.area)]
-    if not matches:
-        matches = [f for f in FACILITIES if st.session_state.service in f["services"]]
-        st.info("No exact area match in the demo; showing other sample options.")
-    for f in matches:
-        with st.container(border=True):
-            st.markdown(f"### {f['name']}")
-            st.write(f"**Area:** {f['area']}  ")
-            st.write(f"**Services:** {', '.join(f['services'])}")
-            st.write(f"**Illustrative wait:** {f['wait']}")
-            st.write(f"**Example appointment options:** {', '.join(f['slots'])}")
-            if st.button(f"Select {f['name']}", key=f"choose_{f['name']}"):
-                st.session_state.facility = f["name"]
-                st.session_state.slot = None
-                go("Choose an option")
-    st.caption("A live service would need a reliable data source and a last-updated timestamp.")
+    if st.session_state.selected_facility:
+        name = st.session_state.selected_facility
+        facility = FACILITIES[name]
+        st.divider()
+        st.subheader("Facility details and appointment selection")
+        st.markdown(f"### {name}")
+        st.write(f"**Location:** {facility['district']} District, {facility['sector']} Sector")
+        st.write(f"**Selected service:** {st.session_state.service}")
+        st.write(f"**Appointment date:** {st.session_state.appointment_date.strftime('%d %B %Y')}")
+        daily_cap, daily_booked, daily_remaining = capacity_summary(name, st.session_state.appointment_date)
+        st.metric("Daily appointments remaining", daily_remaining, f"{daily_booked} booked of {daily_cap}")
+        available_slots = []
+        cols = st.columns(len(st.session_state.slot_capacity[name]))
+        for idx, slot in enumerate(st.session_state.slot_capacity[name]):
+            cap, count, remaining = capacity_summary(name, st.session_state.appointment_date, slot)
+            with cols[idx]:
+                st.metric(slot, f"{remaining} left", f"{count}/{cap} booked")
+                if remaining > 0:
+                    available_slots.append(slot)
+        if available_slots:
+            chosen = st.radio("Select an appointment time", available_slots, horizontal=True, key="patient_slot_choice")
+            st.session_state.selected_slot = chosen
+            st.caption("Selecting a time does not reserve it. Capacity is checked again when you confirm the demo booking.")
+            with st.form("demo_booking_form"):
+                patient_label = st.text_input("Patient name or demo label", placeholder="Use a fictional name for this demonstration")
+                st.caption("Do not enter real identity numbers or sensitive medical information.")
+                submitted = st.form_submit_button(T["book"], type="primary", use_container_width=True)
+            if submitted:
+                # Re-check capacity at submission time to avoid confirming a full slot.
+                _, _, daily_left = capacity_summary(name, st.session_state.appointment_date)
+                _, _, slot_left = capacity_summary(name, st.session_state.appointment_date, chosen)
+                if daily_left < 1 or slot_left < 1:
+                    st.error("This appointment time is no longer available. Please select another time or date.")
+                else:
+                    reference = "KZ-" + uuid.uuid4().hex[:8].upper()
+                    st.session_state.demo_bookings.append({
+                        "reference": reference, "patient": patient_label.strip() or "Demo patient",
+                        "facility": name, "service": st.session_state.service,
+                        "date": str(st.session_state.appointment_date), "slot": chosen,
+                        "status": "Confirmed", "created": datetime.now().isoformat(timespec="minutes"),
+                    })
+                    st.session_state.last_reference = reference
+                    st.success(f"{T['confirmed']} — {reference}")
+                    st.rerun()
+        else:
+            st.warning("No appointment times remain for this date. Try another date within the next seven days or another facility.")
 
-elif st.session_state.page == "Choose an option":
-    st.subheader("Review your preferred option")
-    f = next((x for x in FACILITIES if x["name"] == st.session_state.facility), None)
-    if not f:
-        st.info("Choose a sample facility first.")
-        st.button("Back to options", on_click=go, args=("Find care",))
+    st.divider()
+    st.subheader(T["appointments"])
+    mine = [b for b in st.session_state.demo_bookings if b.get("patient") == st.session_state.get("last_patient_label", b.get("patient"))]
+    # In this demo session, show bookings created in this browser session.
+    if st.session_state.demo_bookings:
+        for booking in st.session_state.demo_bookings:
+            with st.container(border=True):
+                st.write(f"**{booking['reference']}** — {booking['status']}")
+                st.write(f"{booking['facility']} | {booking['service']} | {booking['date']} at {booking['slot']}")
+                if booking["status"] == "Confirmed" and st.button("Cancel demo booking", key=f"cancel_{booking['reference']}"):
+                    booking["status"] = "Cancelled"
+                    st.success("Demo booking cancelled. Its capacity has been released.")
+                    st.rerun()
     else:
-        st.markdown(f"### {f['name']}")
-        st.write(f"Service: **{st.session_state.service}**")
-        st.write("These example slots do not book an appointment.")
-        # Original appointment time selection is preserved.
-        st.session_state.slot = st.radio("Example time", f["slots"], horizontal=True)
-        st.text_area("Questions you would ask the CHV (optional)", placeholder="For example: Is this facility open today?")
-        st.checkbox("I understand this is not a real booking.", value=True, key="booking_ack")
-        st.button("Review next steps →", type="primary", use_container_width=True, on_click=go, args=("Next steps",))
+        st.caption("No demo bookings in this session yet.")
 
-elif st.session_state.page == "Next steps":
-    st.subheader("Your next step")
-    if st.session_state.facility:
-        st.success("You have explored a sample care option.")
-        st.write(f"**Option reviewed:** {st.session_state.facility}")
-        st.write(f"**Example time selected:** {st.session_state.slot or 'Not selected'}")
-        st.write(f"**Navigation pathway:** {st.session_state.mode}")
-    else:
-        st.info("You can return to the facility list and explore sample options.")
-    st.markdown("### What would happen in a real service?")
-    st.markdown("1. Confirm facility details and availability with an authorised provider.\n2. Decide whether you want help with the next step.\n3. Follow the provider’s instructions if you choose to attend.\n4. A CHV may offer an agreed follow-up while respecting your privacy and choice.")
-    st.warning("This prototype does not contact clinics, reserve appointments, store patient records, or replace professional medical advice.")
-
-    # Added proposed follow-up feature; the original next-step information remains.
-    st.markdown("### Keep track of your next appointment")
-    st.write("If a healthcare professional or facility gives you a follow-up date, you can record it in the next step.")
-    st.button("Record a follow-up date →", type="primary", use_container_width=True, on_click=go, args=("Follow-up",))
-    st.button("Restart demo", use_container_width=True, on_click=reset)
+    # Preserve the original CHV navigation and follow-up concepts.
+    with st.expander("Community support and follow-up planning"):
+        st.markdown("**Choose your navigation pathway**")
+        mode = st.radio("How would you like to navigate?", ["Self-navigation", "CHV-assisted navigation"], horizontal=True)
+        if mode == "CHV-assisted navigation":
+            st.info("A Community Health Volunteer may help explain options within their authorised role. CHVs do not replace qualified health professionals.")
+        else:
+            st.info("You can explore independently and request community support if you choose.")
+        st.checkbox("I understand this is a demonstration and choose to continue using sample information.", key="navigation_consent")
+        st.markdown("#### Follow-up plan")
+        st.write("Only record a follow-up date already recommended by a healthcare professional.")
+        st.session_state.followup_service = st.selectbox("Follow-up service", ["Follow-up consultation", "Maternal health follow-up", "Child health follow-up", "Laboratory result review", "Other follow-up"])
+        st.session_state.followup_date = st.date_input("Follow-up date", value=st.session_state.followup_date, min_value=date.today(), key="followup_date_input")
+        st.session_state.followup_notes = st.text_area("Non-sensitive notes (optional)", value=st.session_state.followup_notes)
+        st.session_state.reminder_choice = st.radio("Reminder preference", ["Show reminder in this demo", "I do not want a reminder"])
+        st.caption("This is a session-only plan, not a real reminder or clinical record.")
 
 else:
-    st.subheader("Follow-up and next appointment")
-    st.write("Record a next appointment date that a healthcare professional or facility has already recommended.")
-    st.warning("Kuza does not decide when you need another appointment. Confirm the date and instructions with your healthcare provider.")
-    with st.container(border=True):
-        st.session_state.followup_service = st.selectbox(
-            "Follow-up service",
-            ["Follow-up consultation", "Maternal health follow-up", "Child health follow-up", "Laboratory result review", "Other follow-up"],
-        )
-        st.session_state.followup_date = st.date_input(
-            "Next appointment date (as advised by the facility)",
-            value=st.session_state.followup_date,
-            min_value=date.today(),
-        )
-        st.session_state.followup_notes = st.text_area(
-            "Non-sensitive notes or instructions (optional)",
-            placeholder="Example: Bring the appointment card. Do not enter private medical details.",
-        )
-        st.session_state.reminder_choice = st.radio(
-            "Reminder preference",
-            ["Show reminder in this demo", "I do not want a reminder"],
-        )
-        if st.button("Save follow-up plan in this demo", type="primary", use_container_width=True):
-            st.session_state.followup_status = "Planned"
-            st.success("Follow-up plan displayed for this demo. It is not sent to a clinic or stored in a patient record.")
+    st.subheader(T["staff"])
+    st.warning("DEMO STAFF AREA — this selector is not authentication. A real deployment must use secure staff accounts, role-based permissions and facility-specific access controls.")
+    facility_name = st.selectbox("Select sample facility", list(FACILITIES.keys()))
+    facility = FACILITIES[facility_name]
+    selected_day = st.date_input("Manage appointment date", value=date.today() + timedelta(days=1),
+        min_value=date.today(), max_value=date.today() + timedelta(days=7), key="staff_date")
+    st.markdown(f"### {facility_name}")
+    daily_cap, daily_booked, daily_remaining = capacity_summary(facility_name, selected_day)
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Daily capacity", daily_cap)
+    m2.metric("Booked", daily_booked)
+    m3.metric("Remaining", daily_remaining)
+    with st.form("capacity_form"):
+        new_daily = st.number_input("Set daily capacity", min_value=0, max_value=500, value=int(daily_cap), step=1)
+        st.markdown("#### Individual appointment-slot capacity")
+        new_slot_caps = {}
+        slot_cols = st.columns(len(st.session_state.slot_capacity[facility_name]))
+        for idx, slot in enumerate(st.session_state.slot_capacity[facility_name]):
+            with slot_cols[idx]:
+                new_slot_caps[slot] = st.number_input(f"{slot} capacity", min_value=0, max_value=200,
+                    value=int(st.session_state.slot_capacity[facility_name][slot]), step=1, key=f"cap_{facility_name}_{slot}")
+        save = st.form_submit_button("Save demo capacity")
+        if save:
+            if sum(new_slot_caps.values()) > new_daily:
+                st.error("The sum of individual slot capacities cannot exceed the daily capacity.")
+            elif any(new_slot_caps[s] < booked_count(facility_name, day=selected_day, slot=s) for s in new_slot_caps):
+                st.error("A slot capacity cannot be reduced below the number already booked for this date.")
+            elif new_daily < daily_booked:
+                st.error("Daily capacity cannot be reduced below the number already booked for this date.")
+            else:
+                st.session_state.daily_capacity[facility_name] = int(new_daily)
+                st.session_state.slot_capacity[facility_name] = {s: int(v) for s, v in new_slot_caps.items()}
+                st.success("Demo capacity settings updated for this session.")
+                st.rerun()
 
-    st.markdown("### Follow-up summary")
-    with st.container(border=True):
-        st.write(f"**Status:** {st.session_state.followup_status}")
-        st.write(f"**Date:** {st.session_state.followup_date.strftime('%d %B %Y')}")
-        st.write(f"**Service:** {st.session_state.followup_service}")
-        st.write(f"**Facility:** {st.session_state.facility or 'Confirm with your healthcare provider'}")
-        st.write(f"**Previous example time:** {st.session_state.slot or 'Not selected'}")
-        st.write(f"**Reminder preference:** {st.session_state.reminder_choice}")
-        if st.session_state.followup_notes:
-            st.write(f"**Note:** {st.session_state.followup_notes}")
-        st.caption("This information is held only in the current app session. It is not a real reminder, appointment confirmation or clinical record.")
+    st.markdown("#### Confirmed bookings for this facility and date")
+    facility_bookings = [b for b in st.session_state.demo_bookings if b["facility"] == facility_name and b["date"] == str(selected_day) and b["status"] == "Confirmed"]
+    if facility_bookings:
+        for booking in facility_bookings:
+            with st.container(border=True):
+                st.write(f"**{booking['reference']}** | {booking['patient']} | {booking['service']} | {booking['slot']}")
+                st.caption("Demo booking only. No real patient record is stored.")
+    else:
+        st.caption("No confirmed demo bookings for this facility and date in the current session.")
 
-    new_status = st.selectbox("Update demo follow-up status", ["Planned", "Attended", "Need to reschedule", "Missed"])
-    if st.button("Update follow-up status"):
-        st.session_state.followup_status = new_status
-        st.rerun()
-    st.button("Start a new navigation journey", type="primary", use_container_width=True, on_click=reset)
+    st.markdown("#### Capacity by appointment time")
+    for slot in st.session_state.slot_capacity[facility_name]:
+        cap, count, remaining = capacity_summary(facility_name, selected_day, slot)
+        st.write(f"**{slot}:** {count} booked / {cap} capacity / {remaining} remaining")
 
 st.divider()
-st.markdown("**Prototype purpose:** test whether the CHV explanation, consent step, and path to healthcare options are understandable and trustworthy.")
-st.caption("Safety: For a medical emergency, seek urgent local medical help rather than relying on this prototype.")
+st.caption("Kuza Wellness prototype • Sample facility and capacity data only • Not a live booking service, clinical system or source of medical advice.")
