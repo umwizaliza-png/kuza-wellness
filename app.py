@@ -133,7 +133,7 @@ if not is_staff:
         search = st.button(T["search"], type="primary", use_container_width=True)
 
     if search or st.session_state.get("show_results", False):
-    st.session_state.show_results = True
+        st.session_state.show_results = True
 
     if not st.session_state.selected_facility:
         st.subheader(T["results"])
@@ -189,7 +189,7 @@ if not is_staff:
         st.session_state.selected_facility = None
         st.session_state.selected_slot = None
         st.rerun()
-
+if st.session_state.selected_facility:
         name = st.session_state.selected_facility
         facility = FACILITIES[name]
         st.divider()
@@ -233,7 +233,7 @@ if not is_staff:
                     st.session_state.last_reference = reference
                     st.success(f"{T['confirmed']} — {reference}")
                     st.rerun()
-        else:
+ else:
             st.warning("No appointment times remain for this date. Try another date within the next seven days or another facility.")
 
     st.divider()
