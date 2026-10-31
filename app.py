@@ -133,27 +133,40 @@ if not is_staff:
         search = st.button(T["search"], type="primary", use_container_width=True)
 
     if search or st.session_state.get("show_results", False):
-        st.session_state.show_results = True
+    st.session_state.show_results = True
+
+    if not st.session_state.selected_facility:
         st.subheader(T["results"])
+
         matches = []
+
         for name, facility in FACILITIES.items():
             if st.session_state.service not in facility["services"]:
                 continue
+
             if st.session_state.sector != "All sectors" and facility["sector"] != st.session_state.sector:
                 continue
-            _, _, remaining = capacity_summary(name, st.session_state.appointment_date)
+
+            _, _, remaining = capacity_summary(
+                name, st.session_state.appointment_date
+            )
+
             matches.append((name, facility, remaining))
+
         if not matches:
             st.info("No sample facilities match these filters. Try another service or sector.")
+
         for name, facility, remaining in matches:
             with st.container(border=True):
                 a, b = st.columns([3, 1])
+
                 with a:
                     st.markdown(f"### {name}")
                     st.write(f"**Location:** {facility['district']} District, {facility['sector']} Sector")
                     st.write(f"**Service:** {st.session_state.service}")
                     st.write(f"**Daily capacity:** {st.session_state.daily_capacity[name]}")
                     st.write(f"**{T['remaining']}:** {remaining}")
+
                 with b:
                     if remaining == 0:
                         st.error("Fully booked")
@@ -161,12 +174,22 @@ if not is_staff:
                         st.warning("Limited availability")
                     else:
                         st.success("More slots available")
-                    if st.button(T["choose"], key=f"details_{name}", disabled=remaining == 0, use_container_width=True):
+
+                    if st.button(
+                        T["choose"],
+                        key=f"details_{name}",
+                        disabled=remaining == 0,
+                        use_container_width=True
+                    ):
                         st.session_state.selected_facility = name
                         st.session_state.selected_slot = None
                         st.rerun()
-
     if st.session_state.selected_facility:
+    if st.button("← Change facility"):
+        st.session_state.selected_facility = None
+        st.session_state.selected_slot = None
+        st.rerun()
+
         name = st.session_state.selected_facility
         facility = FACILITIES[name]
         st.divider()
