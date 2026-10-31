@@ -439,6 +439,12 @@ if portal == T["patient"]:
                     )
                 ):
                     booking["status"] = "Cancelled"
+
+                    # Keep the linked CHV navigation record consistent with the booking.
+                    for chv_request in st.session_state.chv_requests:
+                        if chv_request.get("booking_reference") == booking["reference"]:
+                            chv_request["status"] = "Appointment cancelled"
+
                     st.success(
                         "Demo booking cancelled. Its capacity has been released."
                     )
@@ -609,44 +615,64 @@ elif portal == T["chv"]:
             if daily_left_now < 1 or slot_left_now < 1:
                 st.error("This example slot is no longer available. Please select another option.")
             else:
-                reference = "KZ-" + uuid.uuid4().hex[:8].upper()
-                request_id = "CHV-" + uuid.uuid4().hex[:8].upper()
-
-                st.session_state.demo_bookings.append(
-                    {
-                        "reference": reference,
-                        "patient": patient_label.strip(),
-                        "facility": chv_facility,
-                        "service": chv_service,
-                        "date": str(chv_date),
-                        "slot": chv_slot,
-                        "status": "Confirmed",
-                        "channel": "CHV-assisted navigation",
-                        "created": datetime.now().isoformat(timespec="minutes"),
-                    }
+                # Ignore cancelled bookings when checking duplicates, so a cancelled
+                # appointment can be booked again if capacity is available.
+                duplicate_exists = any(
+                    booking.get("channel") == "CHV-assisted navigation"
+                    and booking.get("status") == "Confirmed"
+                    and booking.get("patient", "").strip().casefold()
+                        == patient_label.strip().casefold()
+                    and booking.get("facility") == chv_facility
+                    and booking.get("service") == chv_service
+                    and booking.get("date") == str(chv_date)
+                    and booking.get("slot") == chv_slot
+                    for booking in st.session_state.demo_bookings
                 )
 
-                st.session_state.chv_requests.append(
-                    {
-                        "request_id": request_id,
-                        "booking_reference": reference,
-                        "patient_label": patient_label.strip(),
-                        "chv_label": chv_label.strip() or "CHV demo user",
-                        "service": chv_service,
-                        "facility": chv_facility,
-                        "date": str(chv_date),
-                        "slot": chv_slot,
-                        "followup_date": str(chv_followup_date) if chv_followup_date else "Not recorded",
-                        "status": "Navigation recorded",
-                        "created": datetime.now().isoformat(timespec="minutes"),
-                    }
-                )
-                st.session_state.last_chv_request = request_id
-                st.success(
-                    f"CHV-assisted demonstration recorded. "
-                    f"Request: {request_id} | Booking: {reference}"
-                )
-                st.rerun()
+                if duplicate_exists:
+                    st.warning(
+                        "A confirmed CHV-assisted booking already exists for this "
+                        "patient, facility, service, date and time. No duplicate was created."
+                    )
+                else:
+                    reference = "KZ-" + uuid.uuid4().hex[:8].upper()
+                    request_id = "CHV-" + uuid.uuid4().hex[:8].upper()
+
+                    st.session_state.demo_bookings.append(
+                        {
+                            "reference": reference,
+                            "patient": patient_label.strip(),
+                            "facility": chv_facility,
+                            "service": chv_service,
+                            "date": str(chv_date),
+                            "slot": chv_slot,
+                            "status": "Confirmed",
+                            "channel": "CHV-assisted navigation",
+                            "created": datetime.now().isoformat(timespec="minutes"),
+                        }
+                    )
+
+                    st.session_state.chv_requests.append(
+                        {
+                            "request_id": request_id,
+                            "booking_reference": reference,
+                            "patient_label": patient_label.strip(),
+                            "chv_label": chv_label.strip() or "CHV demo user",
+                            "service": chv_service,
+                            "facility": chv_facility,
+                            "date": str(chv_date),
+                            "slot": chv_slot,
+                            "followup_date": str(chv_followup_date) if chv_followup_date else "Not recorded",
+                            "status": "Navigation recorded",
+                            "created": datetime.now().isoformat(timespec="minutes"),
+                        }
+                    )
+                    st.session_state.last_chv_request = request_id
+                    st.success(
+                        f"CHV-assisted demonstration recorded. "
+                        f"Request: {request_id} | Booking: {reference}"
+                    )
+                    st.rerun()
 
     st.divider()
     st.markdown("### 2. CHV navigation records in this demo session")
