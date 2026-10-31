@@ -41,7 +41,8 @@ SERVICES = [
 
 TEXT = {
     "English": {
-        "patient": "Patient application",
+        "patient": "Patient self-navigation",
+        "chv": "CHV-assisted navigation",
         "staff": "Facility staff dashboard",
         "district": "District",
         "sector": "Sector",
@@ -58,7 +59,8 @@ TEXT = {
         "demo": "DEMO ONLY — sample facilities, capacity and bookings. Not connected to live facilities, a shared database or SMS.",
     },
     "Kinyarwanda": {
-        "patient": "Urubuga rw'umurwayi",
+        "patient": "Kwiyobora k'umurwayi",
+        "chv": "Ubufasha bw'Umujyanama w'Ubuzima (CHV)",
         "staff": "Imicungire y'ikigo nderabuzima",
         "district": "Akarere",
         "sector": "Umurenge",
@@ -88,6 +90,7 @@ def init_state():
         "selected_slot": None,
         "show_results": False,
         "demo_bookings": [],
+        "chv_requests": [],
         "daily_capacity": {
             name: data["daily_capacity"] for name, data in FACILITIES.items()
         },
@@ -177,13 +180,12 @@ with language_column:
 T = TEXT[st.session_state.language]
 portal = st.radio(
     "Choose your access",
-    [T["patient"], T["staff"]],
+    [T["patient"], T["chv"], T["staff"]],
     horizontal=True,
 )
-is_staff = portal == T["staff"]
 st.divider()
 
-if not is_staff:
+if portal == T["patient"]:
     # -------------------- PATIENT APPLICATION --------------------
     st.subheader(T["patient"])
     st.write(
@@ -397,6 +399,7 @@ if not is_staff:
                             "date": str(st.session_state.appointment_date),
                             "slot": chosen,
                             "status": "Confirmed",
+                            "channel": "Patient self-navigation",
                             "created": datetime.now().isoformat(timespec="minutes"),
                         }
                     )
@@ -443,24 +446,13 @@ if not is_staff:
     else:
         st.caption("No demo bookings in this session yet.")
 
-    # Community support and follow-up planning retained from the earlier prototype.
-    with st.expander("Community support and follow-up planning"):
-        st.markdown("**Choose your navigation pathway**")
-        mode = st.radio(
-            "How would you like to navigate?",
-            ["Self-navigation", "CHV-assisted navigation"],
-            horizontal=True,
+    # Follow-up planning retained from the earlier prototype.
+    with st.expander("Follow-up planning"):
+        st.info(
+            "If a healthcare professional has recommended follow-up, you can record "
+            "a demonstration follow-up date here. CHV-assisted navigation is available "
+            "as a separate access option above."
         )
-        if mode == "CHV-assisted navigation":
-            st.info(
-                "A Community Health Volunteer may help explain options within "
-                "their authorised role. CHVs do not replace qualified health professionals."
-            )
-        else:
-            st.info(
-                "You can explore independently and request community support if you choose."
-            )
-
         st.checkbox(
             "I understand this is a demonstration and choose to continue "
             "using sample information.",
@@ -494,6 +486,203 @@ if not is_staff:
         st.caption(
             "This is a session-only plan, not a real reminder or clinical record."
         )
+
+
+elif portal == T["chv"]:
+    # -------------------- CHV-ASSISTED NAVIGATION --------------------
+    st.subheader("Community Health Volunteer (CHV) Navigation Dashboard")
+    st.write(
+        "This demonstration workflow helps a CHV support a patient in exploring "
+        "sample facilities and appointment options. The CHV provides navigation "
+        "support only; qualified healthcare professionals make clinical decisions."
+    )
+    st.warning(
+        "DEMO CHV AREA — this is not a secure CHV account. Use fictional labels only. "
+        "Do not enter names, phone numbers, national ID numbers, diagnoses or other "
+        "sensitive patient information."
+    )
+    st.info(
+        "The CHV can help the patient understand available options, select a facility "
+        "and record a demonstration appointment. Emergency cases must be directed "
+        "to urgent medical care, not routine booking."
+    )
+
+    st.markdown("### 1. Start a navigation request")
+    with st.form("chv_navigation_form"):
+        patient_label = st.text_input(
+            "Patient demo label",
+            placeholder="Example: Demo patient CHV-01",
+            help="Use a fictional label. Do not enter real identifying information."
+        )
+        chv_label = st.text_input(
+            "CHV demo label (optional)",
+            placeholder="Example: CHV Demo 01",
+            help="This field is not authentication or proof of CHV identity."
+        )
+        chv_service = st.selectbox("Service requested", SERVICES, key="chv_service")
+        chv_district = st.selectbox("District", ["Rusizi"], key="chv_district")
+        chv_sector = st.selectbox(
+            "Preferred sector",
+            ["All sectors", "Kamembe", "Gihundwe"],
+            key="chv_sector"
+        )
+        chv_date = st.date_input(
+            "Preferred appointment date",
+            value=date.today() + timedelta(days=1),
+            min_value=date.today(),
+            max_value=date.today() + timedelta(days=7),
+            key="chv_date"
+        )
+
+        matching_facilities = [
+            facility_name
+            for facility_name, facility_data in FACILITIES.items()
+            if chv_service in facility_data["services"]
+            and (
+                chv_sector == "All sectors"
+                or facility_data["sector"] == chv_sector
+            )
+        ]
+
+        if matching_facilities:
+            chv_facility = st.selectbox(
+                "Facility selected with the patient",
+                matching_facilities,
+                key="chv_facility"
+            )
+            available_chv_slots = [
+                slot for slot in st.session_state.slot_capacity[chv_facility]
+                if capacity_summary(chv_facility, chv_date, slot)[2] > 0
+                and capacity_summary(chv_facility, chv_date)[2] > 0
+            ]
+            if available_chv_slots:
+                chv_slot = st.selectbox(
+                    "Example appointment time",
+                    available_chv_slots,
+                    key="chv_slot"
+                )
+            else:
+                chv_slot = None
+                st.warning(
+                    "No example appointment slots remain for this facility and date. "
+                    "Choose another date or facility."
+                )
+        else:
+            chv_facility = None
+            chv_slot = None
+            st.warning("No sample facility matches this service and sector.")
+
+        record_followup = st.checkbox(
+            "Record a follow-up date already recommended by a healthcare professional",
+            key="chv_record_followup"
+        )
+        if record_followup:
+            chv_followup_date = st.date_input(
+                "Follow-up date",
+                value=date.today() + timedelta(days=30),
+                min_value=date.today(),
+                key="chv_followup_date"
+            )
+        else:
+            chv_followup_date = None
+
+        chv_consent = st.checkbox(
+            "I confirm this is a demonstration using fictional, non-sensitive information."
+        )
+        chv_submit = st.form_submit_button(
+            "Record CHV-assisted demonstration",
+            type="primary",
+            use_container_width=True
+        )
+
+    if chv_submit:
+        if not chv_consent:
+            st.error("Please confirm that you are using fictional demonstration information.")
+        elif not patient_label.strip():
+            st.error("Enter a fictional patient demo label to continue.")
+        elif chv_facility is None or chv_slot is None:
+            st.error("No suitable example appointment slot is available. Change the date or filters.")
+        else:
+            _, _, daily_left_now = capacity_summary(chv_facility, chv_date)
+            _, _, slot_left_now = capacity_summary(chv_facility, chv_date, chv_slot)
+
+            if daily_left_now < 1 or slot_left_now < 1:
+                st.error("This example slot is no longer available. Please select another option.")
+            else:
+                reference = "KZ-" + uuid.uuid4().hex[:8].upper()
+                request_id = "CHV-" + uuid.uuid4().hex[:8].upper()
+
+                st.session_state.demo_bookings.append(
+                    {
+                        "reference": reference,
+                        "patient": patient_label.strip(),
+                        "facility": chv_facility,
+                        "service": chv_service,
+                        "date": str(chv_date),
+                        "slot": chv_slot,
+                        "status": "Confirmed",
+                        "channel": "CHV-assisted navigation",
+                        "created": datetime.now().isoformat(timespec="minutes"),
+                    }
+                )
+
+                st.session_state.chv_requests.append(
+                    {
+                        "request_id": request_id,
+                        "booking_reference": reference,
+                        "patient_label": patient_label.strip(),
+                        "chv_label": chv_label.strip() or "CHV demo user",
+                        "service": chv_service,
+                        "facility": chv_facility,
+                        "date": str(chv_date),
+                        "slot": chv_slot,
+                        "followup_date": str(chv_followup_date) if chv_followup_date else "Not recorded",
+                        "status": "Navigation recorded",
+                        "created": datetime.now().isoformat(timespec="minutes"),
+                    }
+                )
+                st.session_state.last_chv_request = request_id
+                st.success(
+                    f"CHV-assisted demonstration recorded. "
+                    f"Request: {request_id} | Booking: {reference}"
+                )
+                st.rerun()
+
+    st.divider()
+    st.markdown("### 2. CHV navigation records in this demo session")
+    st.caption(
+        "These records are stored only in the current Streamlit session. "
+        "They are not shared with real CHVs or healthcare facilities."
+    )
+
+    if st.session_state.chv_requests:
+        for request in reversed(st.session_state.chv_requests):
+            with st.container(border=True):
+                st.write(f"**{request['request_id']}** — {request['status']}")
+                st.write(
+                    f"Patient label: {request['patient_label']} | "
+                    f"CHV label: {request['chv_label']}"
+                )
+                st.write(
+                    f"Service: {request['service']} | Facility: {request['facility']}"
+                )
+                st.write(
+                    f"Appointment: {request['date']} at {request['slot']} | "
+                    f"Booking reference: {request['booking_reference']}"
+                )
+                st.write(f"Follow-up date: {request['followup_date']}")
+    else:
+        st.caption("No CHV-assisted demonstration records have been created in this session.")
+
+    st.divider()
+    st.markdown("### 3. CHV role and safety boundaries")
+    st.markdown(
+        "- Listen to the patient's stated navigation needs.\n"
+        "- Help the patient explore appropriate services and sample facility options.\n"
+        "- Support appointment navigation only within the CHV's authorised role.\n"
+        "- Refer clinical questions to qualified healthcare professionals.\n"
+        "- Do not diagnose, prescribe treatment, or collect sensitive health information in this demo."
+    )
 
 else:
     # -------------------- FACILITY STAFF DASHBOARD --------------------
@@ -601,7 +790,10 @@ else:
                     f"**{booking['reference']}** | {booking['patient']} | "
                     f"{booking['service']} | {booking['slot']}"
                 )
-                st.caption("Demo booking only. No real patient record is stored.")
+                st.caption(
+                    f"Booking pathway: {booking.get('channel', 'Patient self-navigation')} "
+                    "| Demo booking only; no real patient record is stored."
+                )
     else:
         st.caption(
             "No confirmed demo bookings for this facility and date in the current session."
@@ -619,6 +811,6 @@ else:
 
 st.divider()
 st.caption(
-    "Kuza Wellness prototype • Sample facility and capacity data only • "
-    "Not a live booking service, clinical system or source of medical advice."
+    "Kuza Wellness prototype • Patient self-navigation, CHV-assisted navigation "
+    "and facility dashboard • Sample data only; not a live clinical or booking system."
 )
